@@ -109,6 +109,7 @@ PFN_vkCmdBeginDebugUtilsLabelEXT vkCmdBeginDebugUtilsLabelEXT;
 PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass;
 PFN_vkCmdBindDescriptorSets vkCmdBindDescriptorSets;
 PFN_vkCmdBindPipeline vkCmdBindPipeline;
+PFN_vkCmdCopyBuffer vkCmdCopyBuffer;
 PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage;
 PFN_vkCmdDraw vkCmdDraw;
 PFN_vkCmdEndDebugUtilsLabelEXT vkCmdEndDebugUtilsLabelEXT;
@@ -288,6 +289,7 @@ static void load_vulkan_device_functions(VkDevice device) {
     LOAD_DEVICE_FUNCTION(device, vkCmdBeginRenderPass);
     LOAD_DEVICE_FUNCTION(device, vkCmdBindDescriptorSets);
     LOAD_DEVICE_FUNCTION(device, vkCmdBindPipeline);
+    LOAD_DEVICE_FUNCTION(device, vkCmdCopyBuffer);
     LOAD_DEVICE_FUNCTION(device, vkCmdCopyBufferToImage);
     LOAD_DEVICE_FUNCTION(device, vkCmdDraw);
     LOAD_DEVICE_FUNCTION(device, vkCmdEndDebugUtilsLabelEXT);

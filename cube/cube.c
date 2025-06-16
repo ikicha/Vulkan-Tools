@@ -149,10 +149,12 @@ struct texture_object {
 
     VkImage image;
     VkBuffer buffer;
+    VkBuffer buffer2;
     VkImageLayout imageLayout;
 
     VkMemoryAllocateInfo mem_alloc;
     VkDeviceMemory mem;
+    VkDeviceMemory mem2;
     VkImageView view;
     int32_t tex_width, tex_height;
 };
@@ -830,6 +832,39 @@ static void demo_flush_init_cmd(struct demo *demo) {
     vkFreeCommandBuffers(demo->device, demo->cmd_pool, 1, cmd_bufs);
     vkDestroyFence(demo->device, fence, NULL);
     demo->cmd = VK_NULL_HANDLE;
+    {
+        void* data;
+        void* data2;
+        vkMapMemory(demo->device, demo->staging_texture.mem, 0, demo->staging_texture.mem_alloc.allocationSize, 0, &data);
+        vkMapMemory(demo->device, demo->staging_texture.mem2, 0, demo->staging_texture.mem_alloc.allocationSize, 0, &data2);
+        if (memcmp(data, data2, demo->staging_texture.mem_alloc.allocationSize) == 0) {
+
+            printf("same!\n");
+            fflush(stdout);
+        } else {
+            printf("diff!\n");
+            fflush(stdout);
+            const unsigned char* expected_bytes = (const unsigned char*)(data);
+            const unsigned char* actual_bytes = (const unsigned char*)(data2);
+            size_t mismatches_found = 0;
+            const size_t max_mismatches_to_print = 128;
+
+            for (size_t i = 0; i < demo->staging_texture.mem_alloc.allocationSize; ++i) {
+                if (expected_bytes[i] != actual_bytes[i]) {
+                    if (mismatches_found < max_mismatches_to_print) {
+                        fprintf(stderr, "Mismatch at byte %ld: Expected (Src): 0x%x Actual (Dst): 0x%x\n",
+                i, (int)expected_bytes[i], (int)actual_bytes[i]);
+
+                    }
+                    mismatches_found++;
+                }
+            }
+            fprintf(stderr, "Total byte mismatches in isolated test: %ld / %ld\n", mismatches_found, demo->staging_texture.mem_alloc.allocationSize);
+            exit(1);
+        }
+        vkUnmapMemory(demo->device, demo->staging_texture.mem);
+        vkUnmapMemory(demo->device, demo->staging_texture.mem2);
+    }
 }
 
 static void demo_set_image_layout(struct demo *demo, VkImage image, VkImageAspectFlags aspectMask, VkImageLayout old_image_layout,
@@ -1784,6 +1819,41 @@ static void demo_prepare_texture_buffer(struct demo *demo, const char *filename,
     }
 
     vkUnmapMemory(demo->device, tex_obj->mem);
+
+    {
+        const VkBufferCreateInfo buffer_create_info = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                                                    .pNext = NULL,
+                                                    .flags = 0,
+                                                    .size = tex_width * tex_height * 4,
+                                                    .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                                    .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+                                                    .queueFamilyIndexCount = 0,
+                                                    .pQueueFamilyIndices = NULL};
+
+        err = vkCreateBuffer(demo->device, &buffer_create_info, NULL, &tex_obj->buffer2);
+        assert(!err);
+        demo_name_object(demo, VK_OBJECT_TYPE_BUFFER, (uint64_t)tex_obj->buffer2, "TexBuffer(%s)", filename);
+
+        VkMemoryRequirements mem_reqs;
+        vkGetBufferMemoryRequirements(demo->device, tex_obj->buffer2, &mem_reqs);
+
+        tex_obj->mem_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        tex_obj->mem_alloc.pNext = NULL;
+        tex_obj->mem_alloc.allocationSize = mem_reqs.size;
+        tex_obj->mem_alloc.memoryTypeIndex = 0;
+
+        VkFlags requirements = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        pass = memory_type_from_properties(demo, mem_reqs.memoryTypeBits, requirements, &tex_obj->mem_alloc.memoryTypeIndex);
+        assert(pass);
+
+        err = vkAllocateMemory(demo->device, &tex_obj->mem_alloc, NULL, &(tex_obj->mem2));
+        assert(!err);
+        demo_name_object(demo, VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)tex_obj->mem2, "TexBufMemory2(%s)", filename);
+
+        /* bind memory */
+        err = vkBindBufferMemory(demo->device, tex_obj->buffer2, tex_obj->mem2, 0);
+        assert(!err);
+    }
 }
 
 static void demo_prepare_texture_image(struct demo *demo, const char *filename, struct texture_object *tex_obj,
@@ -1920,7 +1990,13 @@ static void demo_prepare_textures(struct demo *demo) {
                 .imageExtent = {demo->staging_texture.tex_width, demo->staging_texture.tex_height, 1},
             };
 
-            vkCmdCopyBufferToImage(demo->cmd, demo->staging_texture.buffer, demo->textures[i].image,
+            VkBufferCopy copy_region2 = {
+                .srcOffset = 0,
+                .dstOffset = 0,
+                .size = demo->staging_texture.tex_width * demo->staging_texture.tex_height * 4,
+            };
+            vkCmdCopyBuffer(demo->cmd, demo->staging_texture.buffer, demo->staging_texture.buffer2, 1, &copy_region2);
+            vkCmdCopyBufferToImage(demo->cmd, demo->staging_texture.buffer2, demo->textures[i].image,
                                    VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
             demo_pop_cb_label(demo, demo->cmd);  // "StagingBufferCopy"
 
@@ -4686,7 +4762,7 @@ static void demo_init(struct demo *demo, int argc, char **argv) {
     demo->gpu_number = -1;
     demo->width = 500;
     demo->height = 500;
-
+demo->use_staging_buffer = true;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--use_staging") == 0) {
             demo->use_staging_buffer = true;
